@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text Editor</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#111; --bar:#eee; --bd:#bbb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1b1b; --fg:#eee; --bar:#2a2a2a; --bd:#555; } }
+  html, body { height:100%; margin:0; }
+  body { display:flex; flex-direction:column; background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif; }
+  #bar { display:flex; gap:8px; align-items:center; padding:6px 10px; background:var(--bar); border-bottom:1px solid var(--bd); flex-wrap:wrap; }
+  button, input[type=text] { font:inherit; padding:6px 12px; border:1px solid var(--bd); border-radius:6px; background:var(--bg); color:var(--fg); }
+  button { cursor:pointer; }
+  #fname { width:12em; }
+  #status { margin-left:auto; font-size:.85em; opacity:.75; }
+  #editor { flex:1; width:100%; box-sizing:border-box; border:0; outline:0; resize:none; padding:16px;
+            font:20px/1.5 Georgia,serif; background:var(--bg); color:var(--fg); }
+  #printout { display:none; }
+  #help { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; }
+  #help div { background:var(--bg); color:var(--fg); padding:20px 28px; border-radius:10px; max-width:420px; }
+  @media print {
+    #bar, #editor, #help { display:none !important; }
+    #printout { display:block; white-space:pre-wrap; word-wrap:break-word; font:12pt/1.5 Georgia,serif; color:#000; background:#fff; }
+    body { display:block; background:#fff; }
+  }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="bOpen" title="Ctrl+O">Open</button>
+  <input id="fname" type="text" value="document.txt" spellcheck="false" autocomplete="off" aria-label="File name">
+  <button id="bSave" title="Ctrl+S">Save</button>
+  <button id="bPrint" title="Ctrl+P">Print</button>
+  <button id="bNew" title="Clear everything">New</button>
+  <button id="bHelp" title="Ctrl+/">?</button>
+  <span id="status"></span>
+  <input id="file" type="file" accept=".txt,text/plain" hidden>
+</div>
+
+<textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off"
+          data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
+          aria-label="Document text" autofocus></textarea>
+<div id="printout"></div>
+
+<div id="help"><div>
+  <h3>Shortcuts</h3>
+  <p><b>Ctrl+S</b> save to a file<br><b>Ctrl+P</b> print<br><b>Ctrl+O</b> open a .txt file<br><b>Ctrl+/</b> this help</p>
+  <p>Your work is also kept automatically on this device.</p>
+  <button id="bClose">Close</button>
+</div></div>
+
+<script>
+(function () {
+  var KEY = 'kiosk-editor:text', NAME_KEY = 'kiosk-editor:name';
+  var ed = document.getElementById('editor'), fname = document.getElementById('fname'),
+      status = document.getElementById('status'), out = document.getElementById('printout'),
+      help = document.getElementById('help'), fileIn = document.getElementById('file');
+
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  ed.value = load(KEY) || '';
+  fname.value = load(NAME_KEY) || fname.value;
+
+  function counts() {
+    var t = ed.value.trim();
+    status.textContent = (t ? t.split(/\s+/).length : 0) + ' words';
+  }
+  ed.addEventListener('input', function () { store(KEY, ed.value); counts(); });
+  fname.addEventListener('change', function () { store(NAME_KEY, fname.value); });
+  counts();
+
+  function save() {
+    var n = (fname.value.trim() || 'document').replace(/[\\\/:*?"<>|]/g, '_');
+    if (!/\.txt$/i.test(n)) n += '.txt';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([ed.value], { type: 'text/plain;charset=utf-8' }));
+    a.download = n;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    status.textContent = 'Saved ' + n;
+  }
+  function print() { out.textContent = ed.value; window.print(); }
+  function openFile() { fileIn.click(); }
+  function newDoc() {
+    if (!ed.value || confirm('Clear all text and start a new document?')) {
+      ed.value = ''; store(KEY, ''); counts(); ed.focus();
+    }
+  }
+  fileIn.addEventListener('change', function () {
+    var f = fileIn.files[0]; if (!f) return;
+    if (ed.value && !confirm('Replace the current text with this file?')) { fileIn.value = ''; return; }
+    var r = new FileReader();
+    r.onload = function () { ed.value = r.result; store(KEY, ed.value); fname.value = f.name; store(NAME_KEY, f.name); counts(); };
+    r.readAsText(f); fileIn.value = '';
+  });
+
+  document.getElementById('bSave').onclick = save;
+  document.getElementById('bPrint').onclick = print;
+  document.getElementById('bOpen').onclick = openFile;
+  document.getElementById('bNew').onclick = newDoc;
+  document.getElementById('bHelp').onclick = function () { help.style.display = 'flex'; };
+  document.getElementById('bClose').onclick = function () { help.style.display = 'none'; ed.focus(); };
+
+  document.addEventListener('keydown', function (e) {
+    if (!(e.ctrlKey || e.metaKey)) { if (e.key === 'Escape') help.style.display = 'none'; return; }
+    var k = e.key.toLowerCase();
+    if (k === 's') { e.preventDefault(); save(); }
+    else if (k === 'p') { e.preventDefault(); print(); }
+    else if (k === 'o') { e.preventDefault(); openFile(); }
+    else if (k === '/' || k === '?') { e.preventDefault(); help.style.display = 'flex'; }
+  });
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+})();
+</script>
+</body>
+</html>
