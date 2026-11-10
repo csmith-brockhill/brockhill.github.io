@@ -11,117 +11,200 @@
   @media (prefers-color-scheme: dark) { :root { --bg:#1b1b1b; --fg:#eee; --bar:#2a2a2a; --bd:#555; } }
   html, body { height:100%; margin:0; }
   body { display:flex; flex-direction:column; background:var(--bg); color:var(--fg); font-family:system-ui,sans-serif; }
-  #bar { display:flex; gap:8px; align-items:center; padding:6px 10px; background:var(--bar); border-bottom:1px solid var(--bd); flex-wrap:wrap; }
-  button, input[type=text] { font:inherit; padding:6px 12px; border:1px solid var(--bd); border-radius:6px; background:var(--bg); color:var(--fg); }
+  button, input[type=text] { font:inherit; padding:8px 14px; border:1px solid var(--bd); border-radius:6px; background:var(--bg); color:var(--fg); }
   button { cursor:pointer; }
-  #fname { width:12em; }
-  #status { margin-left:auto; font-size:.85em; opacity:.75; }
   #editor { flex:1; width:100%; box-sizing:border-box; border:0; outline:0; resize:none; padding:16px;
             font:20px/1.5 Georgia,serif; background:var(--bg); color:var(--fg); }
+  #status { position:fixed; right:16px; bottom:8px; font-size:.8em; opacity:.6; pointer-events:none; }
   #printout { display:none; }
-  #help { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; }
-  #help div { background:var(--bg); color:var(--fg); padding:20px 28px; border-radius:10px; max-width:420px; }
+  .overlay { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6); }
+  .overlay > div { background:var(--bg); color:var(--fg); padding:24px 30px; border-radius:10px; max-width:440px; width:80%; }
+  #nameBox { background:var(--bg); }
+  #nameIn { width:100%; box-sizing:border-box; font-size:1.2em; margin:10px 0 14px; }
   @media print {
-    #bar, #editor, #help { display:none !important; }
+    #editor, #status, .overlay { display:none !important; }
     #printout { display:block; white-space:pre-wrap; word-wrap:break-word; font:12pt/1.5 Georgia,serif; color:#000; background:#fff; }
     body { display:block; background:#fff; }
   }
 </style>
 </head>
 <body>
-<div id="bar">
-  <button id="bOpen" title="Ctrl+O">Open</button>
-  <input id="fname" type="text" value="document.txt" spellcheck="false" autocomplete="off" aria-label="File name">
-  <button id="bSave" title="Ctrl+S">Save</button>
-  <button id="bPrint" title="Ctrl+P">Print</button>
-  <button id="bNew" title="Clear everything">New</button>
-  <button id="bHelp" title="Ctrl+/">?</button>
-  <span id="status"></span>
-  <input id="file" type="file" accept=".txt,text/plain" hidden>
-</div>
-
 <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off"
           data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"
-          aria-label="Document text" autofocus></textarea>
+          aria-label="Document text" disabled></textarea>
+<div id="status"></div>
 <div id="printout"></div>
 
-<div id="help"><div>
+<div id="nameBox" class="overlay"><div>
+  <h2>Welcome</h2>
+  <p>Type your full name, then press Enter.</p>
+  <input id="nameIn" type="text" spellcheck="false" autocomplete="off" autocapitalize="words" aria-label="Your name">
+  <button id="nameGo">Start</button>
+</div></div>
+
+<div id="help" class="overlay"><div>
   <h3>Shortcuts</h3>
-  <p><b>Ctrl+S</b> save to a file<br><b>Ctrl+P</b> print<br><b>Ctrl+O</b> open a .txt file<br><b>Ctrl+/</b> this help</p>
-  <p>Your work is also kept automatically on this device.</p>
+  <p><b>Ctrl+S</b> save to a file<br><b>Ctrl+P</b> print<br><b>Ctrl+O</b> open a saved .txt file<br><b>Ctrl+/</b> show this help</p>
+  <p>Your work is saved automatically every 5 minutes, and is also kept on this device as you type.</p>
   <button id="bClose">Close</button>
 </div></div>
 
 <script>
 (function () {
-  var KEY = 'kiosk-editor:text', NAME_KEY = 'kiosk-editor:name';
-  var ed = document.getElementById('editor'), fname = document.getElementById('fname'),
-      status = document.getElementById('status'), out = document.getElementById('printout'),
-      help = document.getElementById('help'), fileIn = document.getElementById('file');
+  var KEY = 'kiosk-editor:text', FILE_KEY = 'kiosk-editor:file';
+  var AUTOSAVE_MS = 5 * 60 * 1000;
+  var RULE = '------------------------------------------------------------------------';
+  var HEADER = [RULE, 'Name: ', 'Exam Number: ', 'Centre Number: 61865', 'Date: ', 'Exam: ', RULE, '', ''].join('\n');
+
+  var ed = document.getElementById('editor'), status = document.getElementById('status'),
+      out = document.getElementById('printout'), help = document.getElementById('help'),
+      nameBox = document.getElementById('nameBox'), nameIn = document.getElementById('nameIn'),
+      fileIn = document.createElement('input');
+  fileIn.type = 'file'; fileIn.accept = '.txt,text/plain';
 
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-  var RULE = '------------------------------------------------------------------------';
-  var HEADER = [RULE, 'Name: ', 'Exam Number: ', 'Centre Number: 61865', 'Date: ', 'Exam: ', RULE, '', ''].join('\n');
+  var fileName = load(FILE_KEY) || '';
+  var savedText = null, lastSavedAt = '';
 
-  function isBlank() { return ed.value.trim() === '' || ed.value.trim() === HEADER.trim(); }
+  function isBlank() { var t = ed.value.trim(); return t === '' || t === HEADER.trim(); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function today() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function modalOpen() { return nameBox.style.display === 'flex'; }
+
+  var battery = null;
+  function renderStatus() {
+    var t = ed.value.trim(), words = t ? t.split(/\s+/).length : 0;
+    var txt = words + ' words' + (lastSavedAt ? ' \u00b7 saved ' + lastSavedAt : '');
+    var low = false;
+    if (battery) {
+      var pct = Math.round(battery.level * 100);
+      low = pct <= 15 && !battery.charging;
+      txt += ' \u00b7 battery ' + pct + '%' + (battery.charging ? ' (charging)' : '');
+    }
+    status.textContent = txt;
+    status.style.color = low ? '#d00' : '';
+    status.style.opacity = low ? '1' : '';
+  }
+
+  function showNameBox() {
+    nameIn.value = '';
+    nameBox.style.display = 'flex';
+    ed.disabled = true;
+    setTimeout(function () { nameIn.focus(); }, 0);
+  }
+
+  function setNameLine(name) {
+    var m = ed.value.match(/^Name:[ \t]*(.*)$/m);
+    if (m && m[1].trim() === '') {
+      ed.value = ed.value.replace(/^Name:[ \t]*.*$/m, function () { return 'Name: ' + name; });
+    }
+    store(KEY, ed.value);
+  }
+
+  function submitName() {
+    var v = nameIn.value.trim();
+    if (!v) { nameIn.focus(); return; }
+    var safe = v.replace(/[\\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Student';
+    fileName = today() + ' - ' + safe + '.txt';
+    store(FILE_KEY, fileName);
+    setNameLine(v);
+    nameBox.style.display = 'none';
+    ed.disabled = false;
+    ed.focus();
+    ed.setSelectionRange(ed.value.length, ed.value.length);
+    renderStatus();
+  }
+
   function fresh() {
-    ed.value = HEADER; store(KEY, HEADER); counts();
-    var pos = HEADER.indexOf('Name:') + 6;   // cursor after "Name: "
-    ed.focus(); ed.setSelectionRange(pos, pos); ed.scrollTop = 0;
+    ed.value = HEADER; store(KEY, HEADER);
+    fileName = ''; store(FILE_KEY, '');
+    savedText = null; lastSavedAt = '';
+    renderStatus();
+    showNameBox();
   }
 
-  ed.value = load(KEY) || HEADER;
-  fname.value = load(NAME_KEY) || fname.value;
-
-  function counts() {
-    var t = ed.value.trim();
-    status.textContent = (t ? t.split(/\s+/).length : 0) + ' words';
-  }
-  ed.addEventListener('input', function () { store(KEY, ed.value); counts(); });
-  fname.addEventListener('change', function () { store(NAME_KEY, fname.value); });
-  counts();
-  if (isBlank()) fresh();
-
-  function save() {
-    var n = (fname.value.trim() || 'document').replace(/[\\\/:*?"<>|]/g, '_');
-    if (!/\.txt$/i.test(n)) n += '.txt';
+  function download() {
+    var n = fileName || (today() + ' - document.txt');
     var a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([ed.value], { type: 'text/plain;charset=utf-8' }));
     a.download = n;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
-    status.textContent = 'Saved ' + n;
+    savedText = ed.value;
+    var d = new Date(); lastSavedAt = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    renderStatus();
   }
+
+  // Invigilator: write a copy of the current text wherever they choose (e.g. a USB stick).
+  async function exportCopy() {
+    if (!window.showSaveFilePicker) { alert('This browser cannot save a copy to another location.'); return; }
+    try {
+      var h = await window.showSaveFilePicker({
+        suggestedName: fileName || (today() + ' - document.txt'),
+        types: [{ description: 'Text file', accept: { 'text/plain': ['.txt'] } }]
+      });
+      var w = await h.createWritable();
+      await w.write(ed.value);
+      await w.close();
+      alert('Copy saved as: ' + h.name);
+    } catch (err) {
+      if (err && err.name !== 'AbortError') alert('Could not save the copy: ' + (err.message || err));
+    }
+  }
+
   function print() { out.textContent = ed.value; window.print(); }
   function openFile() { fileIn.click(); }
   function newDoc() {
-    if (isBlank() || confirm('Clear all text and start a new document?')) fresh();
+    if (isBlank() || confirm('Clear all text and start a new document for the next student?')) fresh();
   }
+
+  ed.addEventListener('input', function () { store(KEY, ed.value); renderStatus(); });
+  nameIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitName(); } });
+  document.getElementById('nameGo').onclick = submitName;
+  document.getElementById('bClose').onclick = function () { help.style.display = 'none'; ed.focus(); };
+
   fileIn.addEventListener('change', function () {
     var f = fileIn.files[0]; if (!f) return;
     if (!isBlank() && !confirm('Replace the current text with this file?')) { fileIn.value = ''; return; }
     var r = new FileReader();
-    r.onload = function () { ed.value = r.result; store(KEY, ed.value); fname.value = f.name; store(NAME_KEY, f.name); counts(); };
+    r.onload = function () { ed.value = r.result; store(KEY, ed.value); renderStatus(); ed.focus(); };
     r.readAsText(f); fileIn.value = '';
   });
 
-  document.getElementById('bSave').onclick = save;
-  document.getElementById('bPrint').onclick = print;
-  document.getElementById('bOpen').onclick = openFile;
-  document.getElementById('bNew').onclick = newDoc;
-  document.getElementById('bHelp').onclick = function () { help.style.display = 'flex'; };
-  document.getElementById('bClose').onclick = function () { help.style.display = 'none'; ed.focus(); };
-
   document.addEventListener('keydown', function (e) {
-    if (!(e.ctrlKey || e.metaKey)) { if (e.key === 'Escape') help.style.display = 'none'; return; }
-    var k = e.key.toLowerCase();
-    if (k === 's') { e.preventDefault(); save(); }
-    else if (k === 'p') { e.preventDefault(); print(); }
-    else if (k === 'o') { e.preventDefault(); openFile(); }
-    else if (k === '/' || k === '?') { e.preventDefault(); help.style.display = 'flex'; }
+    if (modalOpen()) return;
+    if (e.key === 'Escape') { help.style.display = 'none'; return; }
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.shiftKey && e.altKey && e.code === 'KeyN') { e.preventDefault(); newDoc(); return; } // invigilator only
+    if (e.altKey) return;
+    if (e.code === 'KeyS') { e.preventDefault(); if (e.shiftKey) exportCopy(); else download(); }
+    else if (e.code === 'KeyP') { e.preventDefault(); print(); }
+    else if (e.code === 'KeyO') { e.preventDefault(); openFile(); }
+    else if (e.code === 'Slash') { e.preventDefault(); help.style.display = 'flex'; }
   });
+
+  // Autosave every 5 minutes (only if the text has changed since the last save).
+  setInterval(function () {
+    if (!fileName || modalOpen() || isBlank() || ed.value === savedText) return;
+    download();
+  }, AUTOSAVE_MS);
+
+  // Start-up
+  ed.value = load(KEY) || HEADER;
+  if (isBlank()) { fresh(); }
+  else { ed.disabled = false; renderStatus(); if (!fileName) showNameBox(); else ed.focus(); }
+
+  // Battery level (shown if the browser supports it)
+  if (navigator.getBattery) {
+    navigator.getBattery().then(function (b) {
+      battery = b;
+      b.addEventListener('levelchange', renderStatus);
+      b.addEventListener('chargingchange', renderStatus);
+      renderStatus();
+    }).catch(function () {});
+  }
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
 })();
