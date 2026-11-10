@@ -1,5 +1,5 @@
 // Bump CACHE when you change any file so devices pick up the new version.
-var CACHE = 'kiosk-editor-v1';
+var CACHE = 'kiosk-editor-v2';
 var FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', function (e) {

@@ -62,7 +62,17 @@
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
-  ed.value = load(KEY) || '';
+  var RULE = '------------------------------------------------------------------------';
+  var HEADER = [RULE, 'Name: ', 'Exam Number: ', 'Centre Number: 61865', 'Date: ', 'Exam: ', RULE, '', ''].join('\n');
+
+  function isBlank() { return ed.value.trim() === '' || ed.value.trim() === HEADER.trim(); }
+  function fresh() {
+    ed.value = HEADER; store(KEY, HEADER); counts();
+    var pos = HEADER.indexOf('Name:') + 6;   // cursor after "Name: "
+    ed.focus(); ed.setSelectionRange(pos, pos); ed.scrollTop = 0;
+  }
+
+  ed.value = load(KEY) || HEADER;
   fname.value = load(NAME_KEY) || fname.value;
 
   function counts() {
@@ -72,6 +82,7 @@
   ed.addEventListener('input', function () { store(KEY, ed.value); counts(); });
   fname.addEventListener('change', function () { store(NAME_KEY, fname.value); });
   counts();
+  if (isBlank()) fresh();
 
   function save() {
     var n = (fname.value.trim() || 'document').replace(/[\\\/:*?"<>|]/g, '_');
@@ -86,13 +97,11 @@
   function print() { out.textContent = ed.value; window.print(); }
   function openFile() { fileIn.click(); }
   function newDoc() {
-    if (!ed.value || confirm('Clear all text and start a new document?')) {
-      ed.value = ''; store(KEY, ''); counts(); ed.focus();
-    }
+    if (isBlank() || confirm('Clear all text and start a new document?')) fresh();
   }
   fileIn.addEventListener('change', function () {
     var f = fileIn.files[0]; if (!f) return;
-    if (ed.value && !confirm('Replace the current text with this file?')) { fileIn.value = ''; return; }
+    if (!isBlank() && !confirm('Replace the current text with this file?')) { fileIn.value = ''; return; }
     var r = new FileReader();
     r.onload = function () { ed.value = r.result; store(KEY, ed.value); fname.value = f.name; store(NAME_KEY, f.name); counts(); };
     r.readAsText(f); fileIn.value = '';
